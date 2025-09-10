@@ -11,6 +11,7 @@ import json
 import time
 
 import torch
+import torch.nn as nn
 
 from ..misc import dist_utils, stats
 from ._solver import BaseSolver
@@ -18,6 +19,52 @@ from .det_engine import evaluate, train_one_epoch
 
 
 class DetSolver(BaseSolver):
+    def _export_to_onnx(self, module: nn.Module, output_file):
+        model = module.eval()
+        if hasattr(model, "deploy"):
+            model = model.deploy()
+        postprocessor = self.postprocessor
+        if hasattr(postprocessor, "deploy"):
+            postprocessor = postprocessor.deploy()
+
+        class Model(nn.Module):
+            def __init__(self, model, postprocessor):
+                super().__init__()
+                self.model = model
+                self.postprocessor = postprocessor
+
+            def forward(self, images, orig_target_sizes):
+                outputs = self.model(images)
+                return self.postprocessor(outputs, orig_target_sizes)
+
+        export_model = Model(model, postprocessor).to(self.device)
+        data = torch.rand(1, 3, 640, 640, device=self.device)
+        size = torch.tensor([[640, 640]], device=self.device)
+        _ = export_model(data, size)
+        dynamic_axes = {"images": {0: "N"}, "orig_target_sizes": {0: "N"}}
+        torch.onnx.export(
+            export_model,
+            (data, size),
+            str(output_file),
+            input_names=["images", "orig_target_sizes"],
+            output_names=["labels", "boxes", "scores"],
+            dynamic_axes=dynamic_axes,
+            opset_version=16,
+            do_constant_folding=True,
+        )
+
+    def _save_and_log_best(self, module: nn.Module, ckpt_path):
+        dist_utils.save_on_master(self.state_dict(), ckpt_path)
+        if self.use_mlflow and dist_utils.is_main_process():
+            onnx_path = ckpt_path.with_suffix(".onnx")
+            try:
+                self._export_to_onnx(module, onnx_path)
+            except Exception as e:
+                print(f"Export ONNX failed: {e}")
+            self.mlflow.log_artifact(str(ckpt_path))
+            if onnx_path.exists():
+                self.mlflow.log_artifact(str(onnx_path))
+
     def fit(self):
         self.train()
         args = self.cfg
@@ -133,12 +180,12 @@ class DetSolver(BaseSolver):
                     top1 = best_stat[k]
                     if self.output_dir:
                         if epoch >= self.train_dataloader.collate_fn.stop_epoch:
-                            dist_utils.save_on_master(
-                                self.state_dict(), self.output_dir / "best_stg2.pth"
+                            self._save_and_log_best(
+                                module, self.output_dir / "best_stg2.pth"
                             )
                         else:
-                            dist_utils.save_on_master(
-                                self.state_dict(), self.output_dir / "best_stg1.pth"
+                            self._save_and_log_best(
+                                module, self.output_dir / "best_stg1.pth"
                             )
 
                 best_stat_print[k] = max(best_stat[k], top1)
@@ -148,13 +195,13 @@ class DetSolver(BaseSolver):
                     if epoch >= self.train_dataloader.collate_fn.stop_epoch:
                         if test_stats[k][0] > top1:
                             top1 = test_stats[k][0]
-                            dist_utils.save_on_master(
-                                self.state_dict(), self.output_dir / "best_stg2.pth"
+                            self._save_and_log_best(
+                                module, self.output_dir / "best_stg2.pth"
                             )
                     else:
                         top1 = max(test_stats[k][0], top1)
-                        dist_utils.save_on_master(
-                            self.state_dict(), self.output_dir / "best_stg1.pth"
+                        self._save_and_log_best(
+                            module, self.output_dir / "best_stg1.pth"
                         )
 
                 elif epoch >= self.train_dataloader.collate_fn.stop_epoch:
