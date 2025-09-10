@@ -137,22 +137,16 @@ def export_onnx_model(model: nn.Module,
                       device: str = "cpu",
                       opset: int = 16,
                       simplify: bool = True) -> bool:
-    """
-    Export model + postprocessor to ONNX without mutating the training graph.
-    Returns True if export succeeded, False otherwise.
-    """
-    # 1) Check deps BEFORE touching the model
     try:
         import onnx  # noqa: F401
     except ModuleNotFoundError:
         print("ONNX not installed; skipping export.")
         return False
 
-    # 2) Work on deep copies to avoid side effects
+    import copy
     model_c = copy.deepcopy(model).to(device).eval()
     post_c  = copy.deepcopy(postprocessor).to(device).eval()
 
-    # 3) Switch copies to deploy/inference form only
     if hasattr(model_c, "deploy"):
         model_c = model_c.deploy()
     if hasattr(post_c, "deploy"):
@@ -169,9 +163,11 @@ def export_onnx_model(model: nn.Module,
 
     wrapper = ExportWrapper(model_c, post_c).to(device)
 
-    # 4) Dummy input
-    images = torch.rand(8, 3, 640, 640, device=device)
-    sizes  = torch.tensor([[640, 640]], device=device)
+    # ----- make dummy inputs CONSISTENT -----
+    N = 8  # representative batch; can be 1 if you prefer
+    images = torch.rand(N, 3, 640, 640, device=device, dtype=torch.float32)
+    # IMPORTANT: int64 + same N
+    sizes  = torch.full((N, 2), 640, device=device, dtype=torch.long)
 
     dynamic_axes = {"images": {0: "N"}, "orig_target_sizes": {0: "N"}}
 
@@ -185,12 +181,14 @@ def export_onnx_model(model: nn.Module,
             do_constant_folding=True,
         )
 
-    # 5) Optional simplify
     if simplify:
         try:
             import onnx, onnxsim
-            input_shapes = {"images": images.shape, "orig_target_sizes": sizes.shape}
-            model_simplified, ok = onnxsim.simplify(output_file, dynamic_input_shape=True)
+            # Keep simplification dynamic-shape safe; don't pass fixed shapes.
+            model_simplified, ok = onnxsim.simplify(
+                output_file,
+                dynamic_input_shape=True
+            )
             onnx.save(model_simplified, output_file)
             print(f"Simplified ONNX: {ok}")
         except ModuleNotFoundError:

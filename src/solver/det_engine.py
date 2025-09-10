@@ -285,10 +285,10 @@ def evaluate_onnx(
     preds: List[Dict[str, torch.Tensor]] = []
 
     for i, (samples, targets) in enumerate(metric_logger.log_every(data_loader, 10, header)):
-        images = samples.cpu().numpy()
-        orig_target_sizes = (
-            torch.stack([t["orig_size"] for t in targets], dim=0).cpu().numpy()
-        )
+        # If samples is a tensor already; if it's a NestedTensor use samples.tensors
+        images = samples.detach().cpu().numpy().astype("float32")
+        orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0).cpu().numpy().astype("int64")
+
         labels, boxes, scores = session.run(
             None, {"images": images, "orig_target_sizes": orig_target_sizes}
         )
