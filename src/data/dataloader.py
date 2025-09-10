@@ -4,15 +4,11 @@ Copyright(c) 2023 lyuwenyu. All Rights Reserved.
 """
 
 import random
-from functools import partial
 
 import torch
 import torch.nn.functional as F
 import torch.utils.data as data
 import torchvision
-import torchvision.transforms.v2 as VT
-from torch.utils.data import default_collate
-from torchvision.transforms.v2 import InterpolationMode
 from torchvision.transforms.v2 import functional as VF
 from PIL import Image as PILImage
 
@@ -62,6 +58,17 @@ class DataLoader(data.DataLoader):
         self._shuffle = shuffle
 
 
+def _batch_images(images):
+    """Pad images to the same size and stack them into a batch."""
+    max_h = max(img.shape[-2] for img in images)
+    max_w = max(img.shape[-1] for img in images)
+    c = images[0].shape[0]
+    batched = images[0].new_zeros((len(images), c, max_h, max_w))
+    for i, img in enumerate(images):
+        h, w = img.shape[-2:]
+        batched[i, :, :h, :w] = img
+    return batched
+
 @register()
 def batch_image_collate_fn(items):
     """only batch image"""
@@ -72,10 +79,10 @@ def batch_image_collate_fn(items):
             img = VF.pil_to_tensor(img)
             img = img.float().div(255.0)
             img = Image(img)
-        images.append(img[None])
+        images.append(img)
         targets.append(tgt)
 
-    return torch.cat(images, dim=0), targets
+    return _batch_images(images), targets
 
 
 class BaseCollateFunction(object):
@@ -124,10 +131,10 @@ class BatchImageCollateFunction(BaseCollateFunction):
                 img = VF.pil_to_tensor(img)
                 img = img.float().div(255.0)
                 img = Image(img)
-            images.append(img[None])
+            images.append(img)
             targets.append(tgt)
 
-        images = torch.cat(images, dim=0)
+        images = _batch_images(images)
 
         if self.scales is not None and self.epoch < self.stop_epoch:
             # sz = random.choice(self.scales)
