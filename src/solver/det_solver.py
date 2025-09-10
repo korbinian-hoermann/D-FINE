@@ -28,16 +28,6 @@ class DetSolver(BaseSolver):
         if self.use_mlflow and dist_utils.is_main_process():
             self.mlflow.log_artifact(str(ckpt_path))
 
-            # Export ONNX from a COPY of the current module/postprocessor
-            onnx_path = ckpt_path.with_suffix(".onnx")
-            try:
-                ok = export_onnx_model(module, self.postprocessor, str(onnx_path), device=self.device)
-                if ok:
-                    self.mlflow.log_artifact(str(onnx_path))
-            except Exception as e:
-                print(f"Export ONNX failed: {e}")
-
-
     def fit(self):
         self.train()
         args = self.cfg
@@ -222,16 +212,25 @@ class DetSolver(BaseSolver):
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print("Training time {}".format(total_time_str))
 
+        # ---------- SINGLE final evaluation (pth + onnx) ----------
         if getattr(self, "test_dataloader", None) is not None:
             best_ckpt = self.output_dir / "best_stg2.pth"
             if not best_ckpt.exists():
                 best_ckpt = self.output_dir / "best_stg1.pth"
             if best_ckpt.exists():
                 print(f"Evaluating {best_ckpt} on test dataset")
+
+                # Load the best checkpoint into the live training graph
                 self.load_resume_state(str(best_ckpt))
                 module = self.ema.module if self.ema else self.model
+
+                # COCO GT / evaluator for test
                 coco_gt = get_coco_api_from_dataset(self.test_dataloader.dataset)
-                test_evaluator = CocoEvaluator(coco_gt=coco_gt, iou_types=self.evaluator.iou_types)
+                test_evaluator = CocoEvaluator(
+                    coco_gt=coco_gt, iou_types=self.evaluator.iou_types
+                )
+
+                # ---- 1) Final PTH test evaluation ----
                 test_stats, _ = evaluate(
                     module,
                     self.criterion,
@@ -242,22 +241,33 @@ class DetSolver(BaseSolver):
                     epoch=self.last_epoch,
                     use_mlflow=self.use_mlflow,
                 )
+                metric_names = ["AP50:95", "AP50", "AP75", "APsmall", "APmedium", "APlarge"]
                 if self.use_mlflow and "coco_eval_bbox" in test_stats:
-                    logs = {
-                        f"test/pth/{metric_names[idx]}": test_stats["coco_eval_bbox"][idx]
-                        for idx in range(len(metric_names))
-                    }
+                    logs = {f"test/pth/{metric_names[i]}": test_stats["coco_eval_bbox"][i]
+                            for i in range(len(metric_names))}
+                    logs["epoch"] = self.last_epoch
                     self.mlflow.log_metrics(logs, step=self.last_epoch)
+
+                # ---- 2) Export ONNX once from the best checkpoint ----
                 onnx_path = best_ckpt.with_suffix(".onnx")
                 if not onnx_path.exists():
                     try:
-                        self._export_to_onnx(module, onnx_path)
+                        ok = export_onnx_model(
+                            module,                # live module (exporter deep-copies it)
+                            self.postprocessor,
+                            str(onnx_path),
+                            device="cpu",          # safe default; change to self.device if desired
+                        )
+                        if ok and self.use_mlflow and dist_utils.is_main_process():
+                            self.mlflow.log_artifact(str(onnx_path))
                     except Exception as e:
                         print(f"Export ONNX failed: {e}")
-                    if self.use_mlflow and onnx_path.exists():
-                        self.mlflow.log_artifact(str(onnx_path))
+
+                # ---- 3) Final ONNX test evaluation (if export succeeded) ----
                 if onnx_path.exists():
-                    test_evaluator = CocoEvaluator(coco_gt=coco_gt, iou_types=self.evaluator.iou_types)
+                    test_evaluator = CocoEvaluator(
+                        coco_gt=coco_gt, iou_types=self.evaluator.iou_types
+                    )
                     onnx_stats, _ = evaluate_onnx(
                         onnx_path,
                         self.test_dataloader,
@@ -267,11 +277,12 @@ class DetSolver(BaseSolver):
                         use_mlflow=self.use_mlflow,
                     )
                     if self.use_mlflow and "coco_eval_bbox" in onnx_stats:
-                        logs = {
-                            f"test/onnx/{metric_names[idx]}": onnx_stats["coco_eval_bbox"][idx]
-                            for idx in range(len(metric_names))
-                        }
+                        logs = {f"test/onnx/{metric_names[i]}": onnx_stats["coco_eval_bbox"][i]
+                                for i in range(len(metric_names))}
+                        logs["epoch"] = self.last_epoch
                         self.mlflow.log_metrics(logs, step=self.last_epoch)
+        
+        # -----------------------------------------------------------
 
         if self.use_mlflow:
             self.mlflow.end_run()
