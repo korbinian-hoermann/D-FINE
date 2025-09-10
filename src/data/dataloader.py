@@ -14,6 +14,9 @@ import torchvision.transforms.v2 as VT
 from torch.utils.data import default_collate
 from torchvision.transforms.v2 import InterpolationMode
 from torchvision.transforms.v2 import functional as VF
+from PIL import Image as PILImage
+
+from ._misc import Image
 
 from ..core import register
 
@@ -62,7 +65,17 @@ class DataLoader(data.DataLoader):
 @register()
 def batch_image_collate_fn(items):
     """only batch image"""
-    return torch.cat([x[0][None] for x in items], dim=0), [x[1] for x in items]
+    images = []
+    targets = []
+    for img, tgt in items:
+        if isinstance(img, PILImage):
+            img = VF.pil_to_tensor(img)
+            img = img.float().div(255.0)
+            img = Image(img)
+        images.append(img[None])
+        targets.append(tgt)
+
+    return torch.cat(images, dim=0), targets
 
 
 class BaseCollateFunction(object):
@@ -104,8 +117,17 @@ class BatchImageCollateFunction(BaseCollateFunction):
         # self.interpolation = interpolation
 
     def __call__(self, items):
-        images = torch.cat([x[0][None] for x in items], dim=0)
-        targets = [x[1] for x in items]
+        images = []
+        targets = []
+        for img, tgt in items:
+            if isinstance(img, PILImage):
+                img = VF.pil_to_tensor(img)
+                img = img.float().div(255.0)
+                img = Image(img)
+            images.append(img[None])
+            targets.append(tgt)
+
+        images = torch.cat(images, dim=0)
 
         if self.scales is not None and self.epoch < self.stop_epoch:
             # sz = random.choice(self.scales)
