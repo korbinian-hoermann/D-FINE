@@ -170,7 +170,7 @@ def export_onnx_model(model: nn.Module,
     wrapper = ExportWrapper(model_c, post_c).to(device)
 
     # 4) Dummy input
-    images = torch.rand(1, 3, 640, 640, device=device)
+    images = torch.rand(8, 3, 640, 640, device=device)
     sizes  = torch.tensor([[640, 640]], device=device)
 
     dynamic_axes = {"images": {0: "N"}, "orig_target_sizes": {0: "N"}}
@@ -190,7 +190,7 @@ def export_onnx_model(model: nn.Module,
         try:
             import onnx, onnxsim
             input_shapes = {"images": images.shape, "orig_target_sizes": sizes.shape}
-            model_simplified, ok = onnxsim.simplify(output_file, test_input_shapes=input_shapes)
+            model_simplified, ok = onnxsim.simplify(output_file, dynamic_input_shape=True)
             onnx.save(model_simplified, output_file)
             print(f"Simplified ONNX: {ok}")
         except ModuleNotFoundError:
