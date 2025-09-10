@@ -69,6 +69,7 @@ def batch_image_collate_fn(items):
     targets = []
     for img, tgt in items:
         if isinstance(img, PILImage.Image):
+
             img = VF.pil_to_tensor(img)
             img = img.float().div(255.0)
             img = Image(img)
@@ -120,6 +121,7 @@ class BatchImageCollateFunction(BaseCollateFunction):
         images = []
         targets = []
         for img, tgt in items:
+
             if isinstance(img, PILImage.Image):
                 img = VF.pil_to_tensor(img)
                 img = img.float().div(255.0)
