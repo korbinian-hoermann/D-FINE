@@ -24,6 +24,7 @@ class YAMLConfig(BaseConfig):
         cfg = merge_dict(cfg, kwargs)
 
         self.yaml_cfg = copy.deepcopy(cfg)
+        self._test_dataloader = None
 
         for k in super().__dict__:
             if not k.startswith("_") and k in cfg:
@@ -84,6 +85,14 @@ class YAMLConfig(BaseConfig):
         if self._val_dataloader is None and "val_dataloader" in self.yaml_cfg:
             self._val_dataloader = self.build_dataloader("val_dataloader")
         return super().val_dataloader
+
+    @property
+    def test_dataloader(self) -> DataLoader:
+        if hasattr(self, "_test_dataloader") is False:
+            self._test_dataloader = None
+        if self._test_dataloader is None and "test_dataloader" in self.yaml_cfg:
+            self._test_dataloader = self.build_dataloader("test_dataloader")
+        return self._test_dataloader
 
     @property
     def ema(self) -> torch.nn.Module:

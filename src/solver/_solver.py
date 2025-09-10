@@ -168,6 +168,12 @@ class BaseSolver(object):
         self.val_dataloader = dist_utils.warp_loader(
             self.cfg.val_dataloader, shuffle=self.cfg.val_dataloader.shuffle
         )
+        if getattr(self.cfg, "test_dataloader", None) is not None:
+            self.test_dataloader = dist_utils.warp_loader(
+                self.cfg.test_dataloader, shuffle=self.cfg.test_dataloader.shuffle
+            )
+        else:
+            self.test_dataloader = None
 
         self.evaluator = self.cfg.evaluator
 

@@ -14,8 +14,9 @@ import torch
 import torch.nn as nn
 
 from ..misc import dist_utils, stats
+from ..data import CocoEvaluator, get_coco_api_from_dataset
 from ._solver import BaseSolver
-from .det_engine import evaluate, train_one_epoch
+from .det_engine import evaluate, train_one_epoch, evaluate_onnx
 
 
 class DetSolver(BaseSolver):
@@ -248,6 +249,51 @@ class DetSolver(BaseSolver):
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print("Training time {}".format(total_time_str))
+
+        if getattr(self, "test_dataloader", None) is not None:
+            best_ckpt = self.output_dir / "best_stg2.pth"
+            if not best_ckpt.exists():
+                best_ckpt = self.output_dir / "best_stg1.pth"
+            if best_ckpt.exists():
+                print(f"Evaluating {best_ckpt} on test dataset")
+                self.load_resume_state(str(best_ckpt))
+                module = self.ema.module if self.ema else self.model
+                coco_gt = get_coco_api_from_dataset(self.test_dataloader.dataset)
+                test_evaluator = CocoEvaluator(coco_gt=coco_gt, iou_types=self.evaluator.iou_types)
+                test_stats, _ = evaluate(
+                    module,
+                    self.criterion,
+                    self.postprocessor,
+                    self.test_dataloader,
+                    test_evaluator,
+                    self.device,
+                    epoch=self.last_epoch,
+                    use_mlflow=self.use_mlflow,
+                )
+                if self.use_mlflow and "coco_eval_bbox" in test_stats:
+                    logs = {
+                        f"test/{metric_names[idx]}": test_stats["coco_eval_bbox"][idx]
+                        for idx in range(len(metric_names))
+                    }
+                    self.mlflow.log_metrics(logs, step=self.last_epoch)
+                onnx_path = best_ckpt.with_suffix(".onnx")
+                if onnx_path.exists():
+                    test_evaluator = CocoEvaluator(coco_gt=coco_gt, iou_types=self.evaluator.iou_types)
+                    onnx_stats, _ = evaluate_onnx(
+                        onnx_path,
+                        self.test_dataloader,
+                        test_evaluator,
+                        self.device,
+                        epoch=self.last_epoch,
+                        use_mlflow=self.use_mlflow,
+                    )
+                    if self.use_mlflow and "coco_eval_bbox" in onnx_stats:
+                        logs = {
+                            f"test_onnx/{metric_names[idx]}": onnx_stats["coco_eval_bbox"][idx]
+                            for idx in range(len(metric_names))
+                        }
+                        self.mlflow.log_metrics(logs, step=self.last_epoch)
+
         if self.use_mlflow:
             self.mlflow.end_run()
 
