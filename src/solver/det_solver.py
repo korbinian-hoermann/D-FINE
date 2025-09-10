@@ -17,55 +17,26 @@ from ..misc import dist_utils, stats
 from ..data import CocoEvaluator, get_coco_api_from_dataset
 from ._solver import BaseSolver
 from .det_engine import evaluate, train_one_epoch, evaluate_onnx
+from tools.deployment.export_onnx import export_onnx_model
 
 
 class DetSolver(BaseSolver):
-    def _export_to_onnx(self, module: nn.Module, output_file):
-        model = module.eval()
-        if hasattr(model, "deploy"):
-            model = model.deploy()
-        postprocessor = self.postprocessor
-        if hasattr(postprocessor, "deploy"):
-            postprocessor = postprocessor.deploy()
-
-        class Model(nn.Module):
-            def __init__(self, model, postprocessor):
-                super().__init__()
-                self.model = model
-                self.postprocessor = postprocessor
-
-            def forward(self, images, orig_target_sizes):
-                outputs = self.model(images)
-                return self.postprocessor(outputs, orig_target_sizes)
-
-        export_model = Model(model, postprocessor).to(self.device)
-        data = torch.rand(1, 3, 640, 640, device=self.device)
-        size = torch.tensor([[640, 640]], device=self.device)
-        _ = export_model(data, size)
-        dynamic_axes = {"images": {0: "N"}, "orig_target_sizes": {0: "N"}}
-        torch.onnx.export(
-            export_model,
-            (data, size),
-            str(output_file),
-            input_names=["images", "orig_target_sizes"],
-            output_names=["labels", "boxes", "scores"],
-            dynamic_axes=dynamic_axes,
-            opset_version=16,
-            do_constant_folding=True,
-        )
-
     def _save_and_log_best(self, module: nn.Module, ckpt_path):
+        # Save training state first
         dist_utils.save_on_master(self.state_dict(), ckpt_path)
-        if dist_utils.is_main_process():
+
+        if self.use_mlflow and dist_utils.is_main_process():
+            self.mlflow.log_artifact(str(ckpt_path))
+
+            # Export ONNX from a COPY of the current module/postprocessor
             onnx_path = ckpt_path.with_suffix(".onnx")
             try:
-                self._export_to_onnx(module, onnx_path)
-            except Exception as e:  # pragma: no cover - log best effort
-                print(f"Export ONNX failed: {e}")
-            if self.use_mlflow:
-                self.mlflow.log_artifact(str(ckpt_path))
-                if onnx_path.exists():
+                ok = export_onnx_model(module, self.postprocessor, str(onnx_path), device=self.device)
+                if ok:
                     self.mlflow.log_artifact(str(onnx_path))
+            except Exception as e:
+                print(f"Export ONNX failed: {e}")
+
 
     def fit(self):
         self.train()

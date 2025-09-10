@@ -126,3 +126,73 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     main(args)
+
+
+
+
+import copy
+def export_onnx_model(model: nn.Module,
+                      postprocessor: nn.Module,
+                      output_file: str,
+                      device: str = "cpu",
+                      opset: int = 16,
+                      simplify: bool = True) -> bool:
+    """
+    Export model + postprocessor to ONNX without mutating the training graph.
+    Returns True if export succeeded, False otherwise.
+    """
+    # 1) Check deps BEFORE touching the model
+    try:
+        import onnx  # noqa: F401
+    except ModuleNotFoundError:
+        print("ONNX not installed; skipping export.")
+        return False
+
+    # 2) Work on deep copies to avoid side effects
+    model_c = copy.deepcopy(model).to(device).eval()
+    post_c  = copy.deepcopy(postprocessor).to(device).eval()
+
+    # 3) Switch copies to deploy/inference form only
+    if hasattr(model_c, "deploy"):
+        model_c = model_c.deploy()
+    if hasattr(post_c, "deploy"):
+        post_c = post_c.deploy()
+
+    class ExportWrapper(nn.Module):
+        def __init__(self, m, p):
+            super().__init__()
+            self.m = m
+            self.p = p
+        def forward(self, images, orig_target_sizes):
+            out = self.m(images)
+            return self.p(out, orig_target_sizes)
+
+    wrapper = ExportWrapper(model_c, post_c).to(device)
+
+    # 4) Dummy input
+    images = torch.rand(1, 3, 640, 640, device=device)
+    sizes  = torch.tensor([[640, 640]], device=device)
+
+    dynamic_axes = {"images": {0: "N"}, "orig_target_sizes": {0: "N"}}
+
+    with torch.inference_mode():
+        torch.onnx.export(
+            wrapper, (images, sizes), output_file,
+            input_names=["images", "orig_target_sizes"],
+            output_names=["labels", "boxes", "scores"],
+            dynamic_axes=dynamic_axes,
+            opset_version=opset,
+            do_constant_folding=True,
+        )
+
+    # 5) Optional simplify
+    if simplify:
+        try:
+            import onnx, onnxsim
+            input_shapes = {"images": images.shape, "orig_target_sizes": sizes.shape}
+            model_simplified, ok = onnxsim.simplify(output_file, test_input_shapes=input_shapes)
+            onnx.save(model_simplified, output_file)
+            print(f"Simplified ONNX: {ok}")
+        except ModuleNotFoundError:
+            print("onnxsim not installed; exported unsimplified ONNX.")
+    return True
