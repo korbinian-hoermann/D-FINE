@@ -285,19 +285,20 @@ def evaluate_onnx(
     preds: List[Dict[str, torch.Tensor]] = []
 
     for i, (samples, targets) in enumerate(metric_logger.log_every(data_loader, 10, header)):
-        # If samples is a tensor already; if it's a NestedTensor use samples.tensors
-        images = samples.detach().cpu().numpy().astype("float32")
-        orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0).cpu().numpy().astype("int64")
+        imgs = samples.detach().cpu().numpy().astype("float32")
+        sizes = torch.stack([t["orig_size"] for t in targets], dim=0).cpu().numpy().astype("int64")
 
-        labels, boxes, scores = session.run(
-            None, {"images": images, "orig_target_sizes": orig_target_sizes}
-        )
-        labels = torch.from_numpy(labels)
-        boxes = torch.from_numpy(boxes)
-        scores = torch.from_numpy(scores)
         results = []
-        for lb, bx, sc in zip(labels, boxes, scores):
-            results.append({"labels": lb, "boxes": bx, "scores": sc})
+        for b in range(imgs.shape[0]):
+            feed = {"images": imgs[b:b+1], "orig_target_sizes": sizes[b:b+1]}
+            labels, boxes, scores = session.run(None, feed)
+
+            labels = torch.from_numpy(labels)
+            boxes = torch.from_numpy(boxes)
+            scores = torch.from_numpy(scores)
+            
+            for lb, bx, sc in zip(labels, boxes, scores):
+                results.append({"labels": lb, "boxes": bx, "scores": sc})
 
         res = {t["image_id"].item(): output for t, output in zip(targets, results)}
         if coco_evaluator is not None:
