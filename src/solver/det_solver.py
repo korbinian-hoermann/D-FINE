@@ -23,15 +23,16 @@ class DetSolver(BaseSolver):
         args = self.cfg
         metric_names = ["AP50:95", "AP50", "AP75", "APsmall", "APmedium", "APlarge"]
 
-        if self.use_wandb:
-            import wandb
-
-            wandb.init(
-                project=args.yaml_cfg["project_name"],
-                name=args.yaml_cfg["exp_name"],
-                config=args.yaml_cfg,
-            )
-            wandb.watch(self.model)
+        if self.use_mlflow:
+            self.mlflow.set_experiment(args.yaml_cfg.get("mlflow_experiment", "default"))
+            self.mlflow.start_run(run_name=args.yaml_cfg.get("mlflow_run_name"))
+            flat_params = {
+                k: v
+                for k, v in args.yaml_cfg.items()
+                if isinstance(v, (int, float, str, bool))
+            }
+            if flat_params:
+                self.mlflow.log_params(flat_params)
 
         n_parameters, model_stats = stats(self.cfg)
         print(model_stats)
@@ -50,7 +51,7 @@ class DetSolver(BaseSolver):
                 self.evaluator,
                 self.device,
                 self.last_epoch,
-                self.use_wandb
+                self.use_mlflow
             )
             for k in test_stats:
                 best_stat["epoch"] = self.last_epoch
@@ -86,8 +87,7 @@ class DetSolver(BaseSolver):
                 ema=self.ema,
                 scaler=self.scaler,
                 lr_warmup_scheduler=self.lr_warmup_scheduler,
-                writer=self.writer,
-                use_wandb=self.use_wandb,
+                use_mlflow=self.use_mlflow,
                 output_dir=self.output_dir,
             )
 
@@ -113,16 +113,12 @@ class DetSolver(BaseSolver):
                 self.evaluator,
                 self.device,
                 epoch,
-                self.use_wandb,
+                self.use_mlflow,
                 output_dir=self.output_dir,
             )
 
             # TODO
             for k in test_stats:
-                if self.writer and dist_utils.is_main_process():
-                    for i, v in enumerate(test_stats[k]):
-                        self.writer.add_scalar(f"Test/{k}_{i}".format(k), v, epoch)
-
                 if k in best_stat:
                     best_stat["epoch"] = (
                         epoch if test_stats[k][0] > best_stat[k] else best_stat["epoch"]
@@ -177,12 +173,13 @@ class DetSolver(BaseSolver):
                 "n_parameters": n_parameters,
             }
 
-            if self.use_wandb:
-                wandb_logs = {}
-                for idx, metric_name in enumerate(metric_names):
-                    wandb_logs[f"metrics/{metric_name}"] = test_stats["coco_eval_bbox"][idx]
-                wandb_logs["epoch"] = epoch
-                wandb.log(wandb_logs)
+            if self.use_mlflow:
+                logs = {
+                    f"metrics/{metric_names[idx]}": test_stats["coco_eval_bbox"][idx]
+                    for idx in range(len(metric_names))
+                }
+                logs["epoch"] = epoch
+                self.mlflow.log_metrics(logs, step=epoch)
 
             if self.output_dir and dist_utils.is_main_process():
                 with (self.output_dir / "log.txt").open("a") as f:
@@ -204,9 +201,14 @@ class DetSolver(BaseSolver):
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print("Training time {}".format(total_time_str))
+        if self.use_mlflow:
+            self.mlflow.end_run()
 
     def val(self):
         self.eval()
+        if self.use_mlflow:
+            self.mlflow.set_experiment(self.cfg.yaml_cfg.get("mlflow_experiment", "default"))
+            self.mlflow.start_run(run_name=self.cfg.yaml_cfg.get("mlflow_run_name"))
 
         module = self.ema.module if self.ema else self.model
         test_stats, coco_evaluator = evaluate(
@@ -217,12 +219,15 @@ class DetSolver(BaseSolver):
             self.evaluator,
             self.device,
             epoch=-1,
-            use_wandb=False,
+            use_mlflow=self.use_mlflow,
         )
 
         if self.output_dir:
             dist_utils.save_on_master(
                 coco_evaluator.coco_eval["bbox"].eval, self.output_dir / "eval.pth"
             )
+
+        if self.use_mlflow:
+            self.mlflow.end_run()
 
         return

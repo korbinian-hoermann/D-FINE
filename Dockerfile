@@ -44,5 +44,5 @@ FROM registry.cn-hangzhou.aliyuncs.com/peterande/dfine:v1
 # RUN python3 -m pip install --upgrade pip  && \
 #         python3 -m pip install --upgrade setuptools
 
-# RUN python3 -m pip install jupyterlab pycocotools PyYAML tensorboard scipy
+# RUN python3 -m pip install jupyterlab pycocotools PyYAML mlflow scipy
 # RUN python3 -m pip --default-timeout=10000 install torch torchvision

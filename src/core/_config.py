@@ -3,7 +3,6 @@ Copied from RT-DETR (https://github.com/lyuwenyu/RT-DETR)
 Copyright(c) 2023 lyuwenyu. All Rights Reserved.
 """
 
-from pathlib import Path
 from typing import Callable, Dict, List
 
 import torch
@@ -12,7 +11,6 @@ from torch.cuda.amp.grad_scaler import GradScaler
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader, Dataset
-from torch.utils.tensorboard import SummaryWriter
 
 __all__ = [
     "BaseConfig",
@@ -42,7 +40,6 @@ class BaseConfig(object):
         self._val_dataset: Dataset = None
         self._collate_fn: Callable = None
         self._evaluator: Callable[[nn.Module, DataLoader, str],] = None
-        self._writer: SummaryWriter = None
 
         # dataset
         self.num_workers: int = 0
@@ -71,7 +68,6 @@ class BaseConfig(object):
         self.print_freq: int = None
         self.checkpoint_freq: int = 1
         self.output_dir: str = None
-        self.summary_dir: str = None
         self.device: str = ""
 
     @property
@@ -276,20 +272,6 @@ class BaseConfig(object):
     def evaluator(self, fn):
         assert isinstance(fn, Callable), f"{type(fn)} must be Callable"
         self._evaluator = fn
-
-    @property
-    def writer(self) -> SummaryWriter:
-        if self._writer is None:
-            if self.summary_dir:
-                self._writer = SummaryWriter(self.summary_dir)
-            elif self.output_dir:
-                self._writer = SummaryWriter(Path(self.output_dir) / "summary")
-        return self._writer
-
-    @writer.setter
-    def writer(self, m):
-        assert isinstance(m, SummaryWriter), f"{type(m)} must be SummaryWriter"
-        self._writer = m
 
     def __repr__(self):
         s = ""
