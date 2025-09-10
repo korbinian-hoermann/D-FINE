@@ -53,17 +53,25 @@ class Validator:
             fns += value["FNs"]
             ious.extend(value["IoUs"])
 
-            extended_metrics[f"precision_{key}"] = (
+            precision = (
                 value["TPs"] / (value["TPs"] + value["FPs"])
                 if value["TPs"] + value["FPs"] > 0
                 else 0
             )
-            extended_metrics[f"recall_{key}"] = (
+            recall = (
                 value["TPs"] / (value["TPs"] + value["FNs"])
                 if value["TPs"] + value["FNs"] > 0
                 else 0
             )
+            f1 = (
+                2 * precision * recall / (precision + recall)
+                if (precision + recall) > 0
+                else 0
+            )
 
+            extended_metrics[f"precision_{key}"] = precision
+            extended_metrics[f"recall_{key}"] = recall
+            extended_metrics[f"f1_{key}"] = f1
             extended_metrics[f"iou_{key}"] = np.mean(value["IoUs"])
 
         precision = tps / (tps + fps) if (tps + fps) > 0 else 0

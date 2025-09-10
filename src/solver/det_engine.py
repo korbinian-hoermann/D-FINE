@@ -130,7 +130,7 @@ def train_one_epoch(
     if use_mlflow:
         mlflow.log_metrics(
             {
-                "lr": optimizer.param_groups[0]["lr"],
+                "train/lr": optimizer.param_groups[0]["lr"],
                 "train/loss": float(np.mean(losses)),
             },
             step=epoch,
@@ -224,11 +224,18 @@ def evaluate(
             )
 
     # Conf matrix, F1, Precision, Recall, box IoU
-    metrics = Validator(gt, preds).compute_metrics()
+    metrics = Validator(gt, preds).compute_metrics(extended=True)
     print("Metrics:", metrics)
     if use_mlflow:
-        metrics = {f"metrics/{k}": v for k, v in metrics.items()}
-        mlflow.log_metrics(metrics, step=epoch)
+        log_metrics = {}
+        for k, v in metrics.items():
+            if k == "extended_metrics":
+                for mk, mv in v.items():
+                    base, label = mk.split("_", 1)
+                    log_metrics[f"val/{base}/{label}"] = mv
+            else:
+                log_metrics[f"val/{k}"] = v
+        mlflow.log_metrics(log_metrics, step=epoch)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()

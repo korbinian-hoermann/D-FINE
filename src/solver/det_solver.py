@@ -222,7 +222,7 @@ class DetSolver(BaseSolver):
 
             if self.use_mlflow:
                 logs = {
-                    f"metrics/{metric_names[idx]}": test_stats["coco_eval_bbox"][idx]
+                    f"val/{metric_names[idx]}": test_stats["coco_eval_bbox"][idx]
                     for idx in range(len(metric_names))
                 }
                 logs["epoch"] = epoch
