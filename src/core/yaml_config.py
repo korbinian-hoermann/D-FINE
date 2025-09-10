@@ -88,7 +88,7 @@ class YAMLConfig(BaseConfig):
 
     @property
     def test_dataloader(self) -> DataLoader:
-        if hasattr(self, "test_dataloader") is False:
+        if hasattr(self, "_test_dataloader") is False:
             self._test_dataloader = None
         if self._test_dataloader is None and "test_dataloader" in self.yaml_cfg:
             self._test_dataloader = self.build_dataloader("test_dataloader")
