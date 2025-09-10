@@ -232,7 +232,10 @@ def evaluate(
             if k == "extended_metrics":
                 for mk, mv in v.items():
                     base, label = mk.split("_", 1)
-                    log_metrics[f"val/{base}/{label}"] = mv
+                    # Replace nested slashes with an underscore to
+                    # avoid creating conflicting directories in the
+                    # mlflow metrics store.
+                    log_metrics[f"val/{base}_{label}"] = mv
             else:
                 log_metrics[f"val/{k}"] = v
         mlflow.log_metrics(log_metrics, step=epoch)
