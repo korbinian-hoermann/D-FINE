@@ -250,3 +250,86 @@ def evaluate(
             stats["coco_eval_masks"] = coco_evaluator.coco_eval["segm"].stats.tolist()
 
     return stats, coco_evaluator
+
+
+@torch.no_grad()
+def evaluate_onnx(
+    onnx_path,
+    data_loader,
+    coco_evaluator: CocoEvaluator,
+    device,
+    epoch: int,
+    use_mlflow: bool,
+    **kwargs,
+):
+    import onnxruntime as ort
+
+    session = ort.InferenceSession(
+        str(onnx_path), providers=["CUDAExecutionProvider", "CPUExecutionProvider"]
+    )
+    coco_evaluator.cleanup()
+    metric_logger = MetricLogger(delimiter="  ")
+    header = "Test ONNX:"
+
+    gt: List[Dict[str, torch.Tensor]] = []
+    preds: List[Dict[str, torch.Tensor]] = []
+
+    for i, (samples, targets) in enumerate(metric_logger.log_every(data_loader, 10, header)):
+        images = samples.cpu().numpy()
+        orig_target_sizes = (
+            torch.stack([t["orig_size"] for t in targets], dim=0).cpu().numpy()
+        )
+        labels, boxes, scores = session.run(
+            None, {"images": images, "orig_target_sizes": orig_target_sizes}
+        )
+        labels = torch.from_numpy(labels)
+        boxes = torch.from_numpy(boxes)
+        scores = torch.from_numpy(scores)
+        results = []
+        for lb, bx, sc in zip(labels, boxes, scores):
+            results.append({"labels": lb, "boxes": bx, "scores": sc})
+
+        res = {t["image_id"].item(): output for t, output in zip(targets, results)}
+        if coco_evaluator is not None:
+            coco_evaluator.update(res)
+
+        for idx, (target, result) in enumerate(zip(targets, results)):
+            gt.append(
+                {
+                    "boxes": scale_boxes(
+                        target["boxes"],
+                        (target["orig_size"][1], target["orig_size"][0]),
+                        (samples[idx].shape[-1], samples[idx].shape[-2]),
+                    ),
+                    "labels": target["labels"],
+                }
+            )
+            preds.append(
+                {
+                    "boxes": result["boxes"],
+                    "labels": result["labels"],
+                    "scores": result["scores"],
+                }
+            )
+
+    metrics = Validator(gt, preds).compute_metrics()
+    print("ONNX Metrics:", metrics)
+    if use_mlflow:
+        import mlflow
+
+        mlflow.log_metrics({f"metrics/{k}_onnx": v for k, v in metrics.items()}, step=epoch)
+
+    metric_logger.synchronize_between_processes()
+    if coco_evaluator is not None:
+        coco_evaluator.synchronize_between_processes()
+        coco_evaluator.accumulate()
+        coco_evaluator.summarize()
+
+    stats = {}
+    if coco_evaluator is not None:
+        if "bbox" in coco_evaluator.iou_types:
+            stats["coco_eval_bbox"] = coco_evaluator.coco_eval["bbox"].stats.tolist()
+        if "segm" in coco_evaluator.iou_types:
+            stats["coco_eval_masks"] = coco_evaluator.coco_eval["segm"].stats.tolist()
+
+    return stats, coco_evaluator
