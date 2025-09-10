@@ -56,8 +56,16 @@ class DetSolver(BaseSolver):
 
     def _save_and_log_best(self, module: nn.Module, ckpt_path):
         dist_utils.save_on_master(self.state_dict(), ckpt_path)
-        if self.use_mlflow and dist_utils.is_main_process():
-            self.mlflow.log_artifact(str(ckpt_path))
+        if dist_utils.is_main_process():
+            onnx_path = ckpt_path.with_suffix(".onnx")
+            try:
+                self._export_to_onnx(module, onnx_path)
+            except Exception as e:  # pragma: no cover - log best effort
+                print(f"Export ONNX failed: {e}")
+            if self.use_mlflow:
+                self.mlflow.log_artifact(str(ckpt_path))
+                if onnx_path.exists():
+                    self.mlflow.log_artifact(str(onnx_path))
 
     def fit(self):
         self.train()
@@ -265,7 +273,7 @@ class DetSolver(BaseSolver):
                 )
                 if self.use_mlflow and "coco_eval_bbox" in test_stats:
                     logs = {
-                        f"test/{metric_names[idx]}": test_stats["coco_eval_bbox"][idx]
+                        f"test/pth/{metric_names[idx]}": test_stats["coco_eval_bbox"][idx]
                         for idx in range(len(metric_names))
                     }
                     self.mlflow.log_metrics(logs, step=self.last_epoch)
@@ -289,7 +297,7 @@ class DetSolver(BaseSolver):
                     )
                     if self.use_mlflow and "coco_eval_bbox" in onnx_stats:
                         logs = {
-                            f"test_onnx/{metric_names[idx]}": onnx_stats["coco_eval_bbox"][idx]
+                            f"test/onnx/{metric_names[idx]}": onnx_stats["coco_eval_bbox"][idx]
                             for idx in range(len(metric_names))
                         }
                         self.mlflow.log_metrics(logs, step=self.last_epoch)
