@@ -14,7 +14,6 @@ import numpy as np
 import torch
 import torch.amp
 from torch.cuda.amp.grad_scaler import GradScaler
-from torch.utils.tensorboard import SummaryWriter
 
 from ..data import CocoEvaluator
 from ..data.dataset import mscoco_category2label
@@ -30,12 +29,12 @@ def train_one_epoch(
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     epoch: int,
-    use_wandb: bool,
+    use_mlflow: bool,
     max_norm: float = 0,
     **kwargs,
 ):
-    if use_wandb:
-        import wandb
+    if use_mlflow:
+        import mlflow
 
     model.train()
     criterion.train()
@@ -46,8 +45,6 @@ def train_one_epoch(
     header = "Epoch: [{}]".format(epoch) if epochs is None else "Epoch: [{}/{}]".format(epoch, epochs)
 
     print_freq = kwargs.get("print_freq", 10)
-    writer: SummaryWriter = kwargs.get("writer", None)
-
     ema: ModelEMA = kwargs.get("ema", None)
     scaler: GradScaler = kwargs.get("scaler", None)
     lr_warmup_scheduler: Warmup = kwargs.get("lr_warmup_scheduler", None)
@@ -130,16 +127,13 @@ def train_one_epoch(
         metric_logger.update(loss=loss_value, **loss_dict_reduced)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
-        if writer and dist_utils.is_main_process() and global_step % 10 == 0:
-            writer.add_scalar("Loss/total", loss_value.item(), global_step)
-            for j, pg in enumerate(optimizer.param_groups):
-                writer.add_scalar(f"Lr/pg_{j}", pg["lr"], global_step)
-            for k, v in loss_dict_reduced.items():
-                writer.add_scalar(f"Loss/{k}", v.item(), global_step)
-
-    if use_wandb:
-        wandb.log(
-            {"lr": optimizer.param_groups[0]["lr"], "epoch": epoch, "train/loss": np.mean(losses)}
+    if use_mlflow:
+        mlflow.log_metrics(
+            {
+                "lr": optimizer.param_groups[0]["lr"],
+                "train/loss": float(np.mean(losses)),
+            },
+            step=epoch,
         )
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
@@ -156,11 +150,11 @@ def evaluate(
     coco_evaluator: CocoEvaluator,
     device,
     epoch: int,
-    use_wandb: bool,
+    use_mlflow: bool,
     **kwargs,
 ):
-    if use_wandb:
-        import wandb
+    if use_mlflow:
+        import mlflow
 
     model.eval()
     criterion.eval()
@@ -232,10 +226,9 @@ def evaluate(
     # Conf matrix, F1, Precision, Recall, box IoU
     metrics = Validator(gt, preds).compute_metrics()
     print("Metrics:", metrics)
-    if use_wandb:
+    if use_mlflow:
         metrics = {f"metrics/{k}": v for k, v in metrics.items()}
-        metrics["epoch"] = epoch
-        wandb.log(metrics)
+        mlflow.log_metrics(metrics, step=epoch)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()

@@ -110,8 +110,8 @@ class YAMLConfig(BaseConfig):
         return super().evaluator
 
     @property
-    def use_wandb(self) -> bool:
-        return self.yaml_cfg.get("use_wandb", False)
+    def use_mlflow(self) -> bool:
+        return self.yaml_cfg.get("use_mlflow", False)
 
     @staticmethod
     def get_optim_params(cfg: dict, model: nn.Module):

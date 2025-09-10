@@ -93,7 +93,6 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, help="exp reproducibility")
     parser.add_argument("--use-amp", action="store_true", help="auto mixed precision training")
     parser.add_argument("--output-dir", type=str, help="output directoy")
-    parser.add_argument("--summary-dir", type=str, help="tensorboard summry")
     parser.add_argument(
         "--test-only",
         action="store_true",

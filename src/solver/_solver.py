@@ -144,23 +144,17 @@ class BaseSolver(object):
 
         self.output_dir = Path(cfg.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.writer = cfg.writer
-
-        if self.writer:
-            atexit.register(self.writer.close)
-            if dist_utils.is_main_process():
-                self.writer.add_text("config", "{:s}".format(cfg.__repr__()), 0)
-        self.use_wandb = self.cfg.use_wandb
-        if self.use_wandb:
+        self.use_mlflow = self.cfg.use_mlflow
+        if self.use_mlflow:
             try:
-                import wandb
-                self.use_wandb = True
+                import mlflow
+                self.mlflow = mlflow
             except ImportError:
-                self.use_wandb = False
+                self.use_mlflow = False
+                self.mlflow = None
 
     def cleanup(self):
-        if self.writer:
-            atexit.register(self.writer.close)
+        return
 
     def train(self):
         self._setup()
