@@ -17,9 +17,44 @@ import torch.nn as nn
 from src.core import YAMLConfig
 
 
-def main(
-    args,
-):
+def export_onnx_model(model, postprocessor, output_file, device="cpu"):
+    """Export model and postprocessor to ONNX."""
+    model = model.eval()
+    if hasattr(model, "deploy"):
+        model = model.deploy()
+    if hasattr(postprocessor, "deploy"):
+        postprocessor = postprocessor.deploy()
+
+    class Model(nn.Module):
+        def __init__(self, model, postprocessor) -> None:
+            super().__init__()
+            self.model = model
+            self.postprocessor = postprocessor
+
+        def forward(self, images, orig_target_sizes):
+            outputs = self.model(images)
+            return self.postprocessor(outputs, orig_target_sizes)
+
+    export_model = Model(model, postprocessor).to(device)
+    data = torch.rand(1, 3, 640, 640, device=device)
+    size = torch.tensor([[640, 640]], device=device)
+    _ = export_model(data, size)
+
+    dynamic_axes = {"images": {0: "N"}, "orig_target_sizes": {0: "N"}}
+
+    torch.onnx.export(
+        export_model,
+        (data, size),
+        output_file,
+        input_names=["images", "orig_target_sizes"],
+        output_names=["labels", "boxes", "scores"],
+        dynamic_axes=dynamic_axes,
+        opset_version=16,
+        do_constant_folding=True,
+    )
+
+
+def main(args):
     """main"""
     cfg = YAMLConfig(args.config, resume=args.resume)
 
@@ -28,57 +63,16 @@ def main(
 
     if args.resume:
         checkpoint = torch.load(args.resume, map_location="cpu")
-        if "ema" in checkpoint:
-            state = checkpoint["ema"]["module"]
-        else:
-            state = checkpoint["model"]
-
+        state = checkpoint["ema"]["module"] if "ema" in checkpoint else checkpoint["model"]
         # NOTE load train mode state -> convert to deploy mode
         cfg.model.load_state_dict(state)
-
     else:
         # raise AttributeError('Only support resume to load model.state_dict by now.')
         print("not load model.state_dict, use default init state dict...")
 
-    class Model(nn.Module):
-        def __init__(
-            self,
-        ) -> None:
-            super().__init__()
-            self.model = cfg.model.deploy()
-            self.postprocessor = cfg.postprocessor.deploy()
-
-        def forward(self, images, orig_target_sizes):
-            outputs = self.model(images)
-            outputs = self.postprocessor(outputs, orig_target_sizes)
-            return outputs
-
-    model = Model()
-
-    data = torch.rand(32, 3, 640, 640)
-    size = torch.tensor([[640, 640]])
-    _ = model(data, size)
-
-    dynamic_axes = {
-        "images": {
-            0: "N",
-        },
-        "orig_target_sizes": {0: "N"},
-    }
-
     output_file = args.resume.replace(".pth", ".onnx") if args.resume else "model.onnx"
 
-    torch.onnx.export(
-        model,
-        (data, size),
-        output_file,
-        input_names=["images", "orig_target_sizes"],
-        output_names=["labels", "boxes", "scores"],
-        dynamic_axes=dynamic_axes,
-        opset_version=16,
-        verbose=False,
-        do_constant_folding=True,
-    )
+    export_onnx_model(cfg.model, cfg.postprocessor, output_file)
 
     if args.check:
         import onnx
@@ -92,7 +86,8 @@ def main(
         import onnxsim
 
         dynamic = True
-        # input_shapes = {'images': [1, 3, 640, 640], 'orig_target_sizes': [1, 2]} if dynamic else None
+        data = torch.rand(1, 3, 640, 640)
+        size = torch.tensor([[640, 640]])
         input_shapes = {"images": data.shape, "orig_target_sizes": size.shape} if dynamic else None
         onnx_model_simplify, check = onnxsim.simplify(output_file, test_input_shapes=input_shapes)
         onnx.save(onnx_model_simplify, output_file)

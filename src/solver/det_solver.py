@@ -13,6 +13,8 @@ import time
 import torch
 import torch.nn as nn
 
+from tools.deployment.export_onnx import export_onnx_model
+
 from ..misc import dist_utils, stats
 from ..data import CocoEvaluator, get_coco_api_from_dataset
 from ._solver import BaseSolver
@@ -21,38 +23,7 @@ from .det_engine import evaluate, train_one_epoch, evaluate_onnx
 
 class DetSolver(BaseSolver):
     def _export_to_onnx(self, module: nn.Module, output_file):
-        model = module.eval()
-        if hasattr(model, "deploy"):
-            model = model.deploy()
-        postprocessor = self.postprocessor
-        if hasattr(postprocessor, "deploy"):
-            postprocessor = postprocessor.deploy()
-
-        class Model(nn.Module):
-            def __init__(self, model, postprocessor):
-                super().__init__()
-                self.model = model
-                self.postprocessor = postprocessor
-
-            def forward(self, images, orig_target_sizes):
-                outputs = self.model(images)
-                return self.postprocessor(outputs, orig_target_sizes)
-
-        export_model = Model(model, postprocessor).to(self.device)
-        data = torch.rand(1, 3, 640, 640, device=self.device)
-        size = torch.tensor([[640, 640]], device=self.device)
-        _ = export_model(data, size)
-        dynamic_axes = {"images": {0: "N"}, "orig_target_sizes": {0: "N"}}
-        torch.onnx.export(
-            export_model,
-            (data, size),
-            str(output_file),
-            input_names=["images", "orig_target_sizes"],
-            output_names=["labels", "boxes", "scores"],
-            dynamic_axes=dynamic_axes,
-            opset_version=16,
-            do_constant_folding=True,
-        )
+        export_onnx_model(module, self.postprocessor, str(output_file), device=self.device)
 
     def _save_and_log_best(self, module: nn.Module, ckpt_path):
         dist_utils.save_on_master(self.state_dict(), ckpt_path)
