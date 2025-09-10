@@ -296,7 +296,7 @@ def evaluate_onnx(
             labels = torch.from_numpy(labels)
             boxes = torch.from_numpy(boxes)
             scores = torch.from_numpy(scores)
-            
+
             for lb, bx, sc in zip(labels, boxes, scores):
                 results.append({"labels": lb, "boxes": bx, "scores": sc})
 
@@ -329,6 +329,8 @@ def evaluate_onnx(
         import mlflow
 
         mlflow.log_metrics({f"metrics/{k}_onnx": v for k, v in metrics.items()}, step=epoch)
+        if dist_utils.is_main_process():
+            mlflow.log_artifact(str(onnx_path))
 
     metric_logger.synchronize_between_processes()
     if coco_evaluator is not None:
