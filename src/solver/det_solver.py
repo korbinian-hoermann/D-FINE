@@ -57,14 +57,7 @@ class DetSolver(BaseSolver):
     def _save_and_log_best(self, module: nn.Module, ckpt_path):
         dist_utils.save_on_master(self.state_dict(), ckpt_path)
         if self.use_mlflow and dist_utils.is_main_process():
-            onnx_path = ckpt_path.with_suffix(".onnx")
-            try:
-                self._export_to_onnx(module, onnx_path)
-            except Exception as e:
-                print(f"Export ONNX failed: {e}")
             self.mlflow.log_artifact(str(ckpt_path))
-            if onnx_path.exists():
-                self.mlflow.log_artifact(str(onnx_path))
 
     def fit(self):
         self.train()
@@ -277,6 +270,13 @@ class DetSolver(BaseSolver):
                     }
                     self.mlflow.log_metrics(logs, step=self.last_epoch)
                 onnx_path = best_ckpt.with_suffix(".onnx")
+                if not onnx_path.exists():
+                    try:
+                        self._export_to_onnx(module, onnx_path)
+                    except Exception as e:
+                        print(f"Export ONNX failed: {e}")
+                    if self.use_mlflow and onnx_path.exists():
+                        self.mlflow.log_artifact(str(onnx_path))
                 if onnx_path.exists():
                     test_evaluator = CocoEvaluator(coco_gt=coco_gt, iou_types=self.evaluator.iou_types)
                     onnx_stats, _ = evaluate_onnx(
