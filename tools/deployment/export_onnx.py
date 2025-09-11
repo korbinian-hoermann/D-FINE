@@ -55,7 +55,7 @@ def main(
 
     model = Model()
 
-    data = torch.rand(32, 3, 640, 640)
+    data = torch.rand(8, 3, 640, 640)
     size = torch.tensor([[640, 640]])
     _ = model(data, size)
 
@@ -97,6 +97,8 @@ def main(
         onnx_model_simplify, check = onnxsim.simplify(output_file, test_input_shapes=input_shapes)
         onnx.save(onnx_model_simplify, output_file)
         print(f"Simplify onnx model {check}...")
+    
+    print(f"ONNX model export to {output_file} done...")
 
 
 if __name__ == "__main__":

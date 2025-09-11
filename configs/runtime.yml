@@ -19,6 +19,6 @@ ema:
   decay: 0.9999
   warmups: 1000
 
-use_mlflow: False
+use_mlflow: True
 mlflow_experiment: D-FINE
 mlflow_run_name: baseline
