@@ -275,13 +275,14 @@ class DetSolver(BaseSolver):
                         self.device,
                         epoch=self.last_epoch,
                         use_mlflow=self.use_mlflow,
+                        output_dir=self.output_dir,
                     )
                     if self.use_mlflow and "coco_eval_bbox" in onnx_stats:
                         logs = {f"test/onnx/{metric_names[i]}": onnx_stats["coco_eval_bbox"][i]
                                 for i in range(len(metric_names))}
                         logs["epoch"] = self.last_epoch
                         self.mlflow.log_metrics(logs, step=self.last_epoch)
-        
+
         # -----------------------------------------------------------
 
         if self.use_mlflow:
