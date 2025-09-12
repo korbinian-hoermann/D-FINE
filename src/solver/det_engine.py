@@ -323,12 +323,20 @@ def evaluate_onnx(
                 }
             )
 
-    metrics = Validator(gt, preds).compute_metrics()
+    metrics = Validator(gt, preds).compute_metrics(extended=True)
     print("ONNX Metrics:", metrics)
     if use_mlflow:
         import mlflow
 
-        mlflow.log_metrics({f"metrics/{k}_onnx": v for k, v in metrics.items()}, step=epoch)
+        log_metrics = {}
+        for k, v in metrics.items():
+            if k == "extended_metrics":
+                for mk, mv in v.items():
+                    base, label = mk.split("_", 1)
+                    log_metrics[f"test/onnx/{base}_{label}"] = mv
+            else:
+                log_metrics[f"test/onnx/{k}"] = v
+        mlflow.log_metrics(log_metrics, step=epoch)
         if dist_utils.is_main_process():
             mlflow.log_artifact(str(onnx_path))
 
