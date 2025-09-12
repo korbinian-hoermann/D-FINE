@@ -251,9 +251,10 @@ class Validator:
 
         return metrics_per_class, conf_matrix, class_to_idx
 
-    def save_plots(self, path_to_save) -> None:
+    def save_plots(self, path_to_save) -> List[Path]:
         path_to_save = Path(path_to_save)
         path_to_save.mkdir(parents=True, exist_ok=True)
+        saved_files: List[Path] = []
 
         if self.conf_matrix is not None:
             class_labels = [str(cls_id) for cls_id in self.class_to_idx.keys()] + ["background"]
@@ -281,7 +282,41 @@ class Validator:
             plt.ylabel("True label")
             plt.xlabel("Predicted label")
             plt.tight_layout()
-            plt.savefig(path_to_save / "confusion_matrix.png")
+            cm_path = path_to_save / "confusion_matrix.png"
+            plt.savefig(cm_path)
+            saved_files.append(cm_path)
+            plt.close()
+
+            # Normalized confusion matrix
+            norm_matrix = self.conf_matrix.astype("float")
+            row_sums = norm_matrix.sum(axis=1, keepdims=True)
+            norm_matrix = np.divide(norm_matrix, row_sums, where=row_sums != 0)
+
+            plt.figure(figsize=(10, 8))
+            plt.imshow(norm_matrix, interpolation="nearest", cmap=plt.cm.Blues)
+            plt.title("Normalized Confusion Matrix")
+            plt.colorbar()
+            tick_marks = np.arange(len(class_labels))
+            plt.xticks(tick_marks, class_labels, rotation=45)
+            plt.yticks(tick_marks, class_labels)
+
+            thresh = norm_matrix.max() / 2.0
+            for i in range(norm_matrix.shape[0]):
+                for j in range(norm_matrix.shape[1]):
+                    plt.text(
+                        j,
+                        i,
+                        f"{norm_matrix[i, j]:.2f}",
+                        horizontalalignment="center",
+                        color="white" if norm_matrix[i, j] > thresh else "black",
+                    )
+
+            plt.ylabel("True label")
+            plt.xlabel("Predicted label")
+            plt.tight_layout()
+            ncm_path = path_to_save / "normalized_confusion_matrix.png"
+            plt.savefig(ncm_path)
+            saved_files.append(ncm_path)
             plt.close()
 
         thresholds = self.thresholds
@@ -299,7 +334,43 @@ class Validator:
             recalls.append(metrics["recall"])
             f1_scores.append(metrics["f1"])
 
-        # Plot Precision and Recall vs Threshold
+        # Precision-Recall curve
+        plt.figure()
+        plt.plot(recalls, precisions, marker="o")
+        plt.xlabel("Recall")
+        plt.ylabel("Precision")
+        plt.title("Precision-Recall Curve")
+        plt.grid(True)
+        pr_curve_path = path_to_save / "precision_recall_curve.png"
+        plt.savefig(pr_curve_path)
+        saved_files.append(pr_curve_path)
+        plt.close()
+
+        # Precision vs Threshold
+        plt.figure()
+        plt.plot(thresholds, precisions, marker="o")
+        plt.xlabel("Threshold")
+        plt.ylabel("Precision")
+        plt.title("Precision vs Threshold")
+        plt.grid(True)
+        precision_curve_path = path_to_save / "precision_curve.png"
+        plt.savefig(precision_curve_path)
+        saved_files.append(precision_curve_path)
+        plt.close()
+
+        # Recall vs Threshold
+        plt.figure()
+        plt.plot(thresholds, recalls, marker="o")
+        plt.xlabel("Threshold")
+        plt.ylabel("Recall")
+        plt.title("Recall vs Threshold")
+        plt.grid(True)
+        recall_curve_path = path_to_save / "recall_curve.png"
+        plt.savefig(recall_curve_path)
+        saved_files.append(recall_curve_path)
+        plt.close()
+
+        # Plot combined Precision and Recall vs Threshold
         plt.figure()
         plt.plot(thresholds, precisions, label="Precision", marker="o")
         plt.plot(thresholds, recalls, label="Recall", marker="o")
@@ -308,17 +379,21 @@ class Validator:
         plt.title("Precision and Recall vs Threshold")
         plt.legend()
         plt.grid(True)
-        plt.savefig(path_to_save / "precision_recall_vs_threshold.png")
+        pr_vs_thres_path = path_to_save / "precision_recall_vs_threshold.png"
+        plt.savefig(pr_vs_thres_path)
+        saved_files.append(pr_vs_thres_path)
         plt.close()
 
         # Plot F1 Score vs Threshold
         plt.figure()
-        plt.plot(thresholds, f1_scores, label="F1 Score", marker="o")
+        plt.plot(thresholds, f1_scores, marker="o")
         plt.xlabel("Threshold")
         plt.ylabel("F1 Score")
         plt.title("F1 Score vs Threshold")
         plt.grid(True)
-        plt.savefig(path_to_save / "f1_score_vs_threshold.png")
+        f1_path = path_to_save / "f1_score_vs_threshold.png"
+        plt.savefig(f1_path)
+        saved_files.append(f1_path)
         plt.close()
 
         # Find the best threshold based on F1 Score (last occurence)
@@ -329,6 +404,8 @@ class Validator:
         logger.info(
             f"Best Threshold: {round(best_threshold, 2)} with F1 Score: {round(best_f1, 3)}"
         )
+
+        return saved_files
 
 
 def filter_preds(preds, conf_thresh):

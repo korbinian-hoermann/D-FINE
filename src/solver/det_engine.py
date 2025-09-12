@@ -8,6 +8,7 @@ Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 
 import math
 import sys
+from pathlib import Path
 from typing import Dict, Iterable, List
 
 import numpy as np
@@ -323,7 +324,8 @@ def evaluate_onnx(
                 }
             )
 
-    metrics = Validator(gt, preds).compute_metrics(extended=True)
+    validator = Validator(gt, preds)
+    metrics = validator.compute_metrics(extended=True)
     print("ONNX Metrics:", metrics)
     if use_mlflow:
         import mlflow
@@ -337,8 +339,23 @@ def evaluate_onnx(
             else:
                 log_metrics[f"test/onnx/{k}"] = v
         mlflow.log_metrics(log_metrics, step=epoch)
-        if dist_utils.is_main_process():
+
+    output_dir = kwargs.get("output_dir", None)
+    plot_files = []
+    if output_dir is not None and dist_utils.is_main_process():
+        plot_dir = Path(output_dir) / "onnx_eval"
+        plot_files = validator.save_plots(plot_dir)
+        if use_mlflow:
+            import mlflow
+
+            for p in plot_files:
+                mlflow.log_artifact(str(p), artifact_path="onnx_eval")
+        if use_mlflow:
+            import mlflow
             mlflow.log_artifact(str(onnx_path))
+    elif use_mlflow and dist_utils.is_main_process():
+        import mlflow
+        mlflow.log_artifact(str(onnx_path))
 
     metric_logger.synchronize_between_processes()
     if coco_evaluator is not None:
